@@ -145,7 +145,7 @@ Under the plugin sits [Ontomark](https://github.com/DreamLab-AI/ontomark), a Rus
 
 ## Working status
 
-**Reviewed 31 October 2026.** The plugin manifest is **0.4.1**, desktop only, with minimum Obsidian **1.7.2**. [`engine.json`](engine.json) pins Ontomark **v0.7.0**, source `0caae5d4`, by SHA-256. That engine reads code fences by the CommonMark rule, and its ingest no longer merges names that differ only by a number (`ISO 9001` / `ISO 14001`); note ingest output is otherwise unchanged. Ontomark's current CLI release is a separate product: installing this plugin does not install or upgrade the CLI, and it does not imply the plugin includes later compiler features.
+**Reviewed 1 November 2026.** The plugin manifest is **0.4.2**, desktop only, with minimum Obsidian **1.7.2**. [`engine.json`](engine.json) pins Ontomark **v0.7.0**, source `0caae5d4`, by SHA-256. That engine reads code fences by the CommonMark rule, and its ingest no longer merges names that differ only by a number (`ISO 9001` / `ISO 14001`); note ingest output is otherwise unchanged. Ontomark's current CLI release is a separate product: installing this plugin does not install or upgrade the CLI, and it does not imply the plugin includes later compiler features.
 
 The [desktop acceptance record](docs/desktop-acceptance.md) identifies the tested Linux Obsidian version, synthetic vaults, plugin/engine revisions and observed behaviours. It covers indexing, query, graph navigation and reviewed edits, with additional ingest checks against a local stub. It does not establish mobile support, performance of this exact release on every vault, or successful integration with a real remote model.
 
@@ -170,8 +170,8 @@ Ontomark is in the community directory: **Settings → Community plugins → Bro
 
 To install by hand instead:
 
-1. Download [ontomark-obsidian-0.4.1.zip](https://github.com/DreamLab-AI/ontomark-obsidian/releases/download/0.4.1/ontomark-obsidian-0.4.1.zip) from the [0.4.1 release](https://github.com/DreamLab-AI/ontomark-obsidian/releases/tag/0.4.1).
-2. Extract it into `<vault>/.obsidian/plugins/`; it creates an `ontomark` folder.
+1. Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/DreamLab-AI/ontomark-obsidian/releases/latest).
+2. Put them in a new `<vault>/.obsidian/plugins/ontomark/` folder.
 3. **Settings → Community plugins**, enable Ontomark, reload if Obsidian was open.
 
 The installed release includes its engine: ordinary indexing, reasoning and queries need no Node, Rust, account, database or internet connection. Downloading a release and optional model ingest use the network.
@@ -223,4 +223,4 @@ npm run test:offline
 
 ## Licence
 
-MIT OR Apache-2.0. The release ZIP includes [third-party notices](THIRD-PARTY-NOTICES.md); [upstream credits](https://github.com/DreamLab-AI/ontomark/blob/main/docs/UPSTREAMS.md) cover the engine's components.
+MIT OR Apache-2.0. The repository carries the licences and [third-party notices](THIRD-PARTY-NOTICES.md); [upstream credits](https://github.com/DreamLab-AI/ontomark/blob/main/docs/UPSTREAMS.md) cover the engine's components.

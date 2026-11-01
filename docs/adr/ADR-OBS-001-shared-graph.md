@@ -25,6 +25,6 @@ Ontomark owns reusable ontology parsing, reasoning, graph rendering and the NGG1
 
 The graph adapts the typed engine index without minting additional identities or turning prose links into ontology assertions. Classification remains explicit, incomplete reasoning remains visible, and inferred edges are dashed. The publisher uses the same renderer with its own stores, layout worker and navigation.
 
-The Linux ZIP includes ready-to-install runtime files and dependency notices. Node and Rust are build tools; users need only Obsidian. Community distribution stays in this repository, avoiding the compiler workspace and estate-specific infrastructure.
+The release publishes the three runtime files Obsidian installs (`main.js`, `manifest.json`, `styles.css`), each with a build-provenance attestation; since 0.4.2 there is no ZIP, and the licences and dependency notices live in the repository. Node and Rust are build tools; users need only Obsidian. Community distribution stays in this repository, avoiding the compiler workspace and estate-specific infrastructure.
 
 See [Ontomark’s accepted decision](https://github.com/DreamLab-AI/ontomark/blob/main/docs/adr/ADR-OM-002-shared-graph-and-obsidian-boundary.md), [desktop acceptance](../desktop-acceptance.md) and [upstream attribution](https://github.com/DreamLab-AI/ontomark/blob/main/docs/UPSTREAMS.md).

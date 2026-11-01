@@ -58,7 +58,7 @@ export function templateOffers(): TemplateOffer[] {
 
 /** An IRI is safe to put between `<` and `>` when it has no angle brackets, quotes, braces, whitespace or control characters. */
 export function safeIri(iri: string): boolean {
-  // eslint-disable-next-line no-control-regex
+  // eslint-disable-next-line no-control-regex -- control characters are exactly what an IRI must not contain
   return iri.length > 0 && !/[<>"{}|\\^`\s\u0000-\u001f]/.test(iri);
 }
 

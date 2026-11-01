@@ -319,12 +319,14 @@ export class OntomarkSettingTab extends PluginSettingTab {
           // The DOM `change` event, not every keystroke: it fires when the value
           // is committed (blur or Enter), which matters for a control whose
           // change reindexes the vault.
-          t.inputEl.addEventListener("change", async () => {
-            const v = t.inputEl.value;
-            const problem = (await control.validate?.(v)) || null;
-            t.inputEl.toggleClass("ontomark-invalid", problem !== null);
-            t.inputEl.title = problem ?? "";
-            if (problem === null) await this.setControlValue(key, v);
+          t.inputEl.addEventListener("change", () => {
+            void (async () => {
+              const v = t.inputEl.value;
+              const problem = (await control.validate?.(v)) || null;
+              t.inputEl.toggleClass("ontomark-invalid", problem !== null);
+              t.inputEl.title = problem ?? "";
+              if (problem === null) await this.setControlValue(key, v);
+            })();
           });
         });
         return;
