@@ -61,3 +61,12 @@ deliberately obfuscated call, and this record says so.
 The implementation now exists in `src/main.ts` and `src/ingest-transport.ts` and ships with plugin 0.3.6; the proposal's initial implementation and activation labels above describe its original date. The release pins engine v0.4.0 in `engine.json`. The registered command is “Extract facts from this note”.
 
 The redirect amendment describes an endpoint requirement, not an enforced destination guarantee. `requestUrl` may follow a redirect before returning a response. Rejecting a returned 3xx cannot prevent that earlier hop, and the plugin does not observe the final URL. A configured credential is sent in the HTTP authorisation header, while remaining absent from the model prompt. Installed-desktop redirect behaviour remains unverified in `docs/desktop-acceptance.md`.
+
+## Amendment (2026-11-05): plain http, Jev failures and the run deadline
+
+Plugin 0.5.0 answers an [external review](https://github.com/DreamLab-AI/ontomark/blob/main/docs/reviews/2026-11-05-external/REGISTER.md) (findings B, C, E and K).
+
+- **Endpoint rule** (`endpointProblem` in `src/endpoint.ts`, shared by the ingest and Jev endpoints). `https:` is always accepted. Plain `http:` is accepted for this machine only (`localhost`, `*.localhost`, 127.0.0.0/8, `[::1]`) unless the user turns on *Allow plain http to other hosts*, because the bearer key and the note text would otherwise cross the network unencrypted. A Jev endpoint refused under this rule falls back with the reason `insecure-endpoint`. The redirect caveat above is unchanged.
+- **Jev failures.** The verification state is shown in the review dialog: `verified`, or `not_verified` with its reason. When the withholding threshold is above 0 the run fails closed: every fact Jev did not verify is withheld as `not_verified` and is not in the patch. At 0 (advisory) the facts are kept under a banner saying they were not checked. Before 0.5.0 a verifier failure silently returned the unfiltered result.
+- **Lifecycle.** The run checks for abort after planning, after accept, after Jev and after Apply is pressed, so unloading the plugin mid-run writes nothing. A disk write that succeeded is reported as applied even if the engine update after it fails; the note on disk is authoritative and is reloaded.
+- **Deadline.** A run stops after 10 minutes in total; each call's timeout is capped at the time left, unsent chunks are reported and nothing partial is applied.
