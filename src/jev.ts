@@ -88,7 +88,9 @@ export async function jevAsk(
 ): Promise<Asked<Record<string, Json>>> {
   if (!cfg.enabled) return fallback(deps, set, "flag-off");
   const endpoint = cfg.endpoint.trim();
-  if (!endpoint || endpointProblem(endpoint, { allowInsecureHttp: cfg.allowInsecureHttp })) return fallback(deps, set, "no-endpoint");
+  if (!endpoint || endpointProblem(endpoint, { allowInsecureHttp: true })) return fallback(deps, set, "no-endpoint");
+  // A usable URL refused only for being plain http to another host: say so, so the reason names the setting's cause.
+  if (endpointProblem(endpoint, { allowInsecureHttp: cfg.allowInsecureHttp })) return fallback(deps, set, "insecure-endpoint");
   let reply: JevReply;
   try {
     reply = await deps.post(

@@ -112,6 +112,9 @@ describe("ontomark-sparql blocks", () => {
       expect(b.lastError, `block ${i}`).toBeNull();
       expect((b.lastResult as { rows: unknown[] } | null)?.rows.length, `block ${i}`).toBeGreaterThan(0);
       expect(els[i].find((e) => e.tagName === "TABLE"), `block ${i}`).not.toBeNull();
+      // No directive: the asserted dataset, with no incompleteness warning.
+      expect(byData(els[i], "query-status")?.textContent, `block ${i}`).toMatch(/^Dataset asserted · generation \d+ · asserted triples only$/);
+      expect(byData(els[i], "query-incomplete"), `block ${i}`).toBeNull();
     }
     for (const b of blocks) b.unload();
     api.dispose();

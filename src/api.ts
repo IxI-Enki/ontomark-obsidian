@@ -276,10 +276,12 @@ export class OntomarkApi {
     }
     // Writing the file and updating the engine are two steps, not one atomic
     // change. The file on disk is the source of truth: once `process` has
-    // written it the edit is applied, whatever happens to the engine next. If
-    // the update fails (most often because a reindex or unload disposed this
-    // client), the vault's modify event or the next reindex loads the new
-    // text, so the outcome is still `applied`, not a failure.
+    // written it the edit is applied, whatever happens to the engine next, so
+    // a failed update is not reported as a failed edit. A disposed client
+    // (reindex or unload) is replaced by one that reads the vault, and the
+    // write's modify event reaches that one; a live client has already
+    // recorded the new text (`upsert` stores it before sending), and the
+    // worker restart that follows a failed mutation replays it.
     try {
       await this.client.upsert(path, proposal.new_text);
     } catch {

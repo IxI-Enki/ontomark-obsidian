@@ -73,7 +73,7 @@ const FAILURES: [string, Partial<JevConfig>, (b: Sent["body"]) => JevReply | Err
   ["flag-off", { enabled: false }, () => new Error("must not be called")],
   ["no-endpoint", { endpoint: "" }, () => new Error("must not be called")],
   ["no-endpoint", { endpoint: "ftp://x" }, () => new Error("must not be called")],
-  ["no-endpoint", { endpoint: "http://192.168.2.10:8084/v1/systemone", allowInsecureHttp: false }, () => new Error("must not be called")],
+  ["insecure-endpoint", { endpoint: "http://192.168.2.10:8084/v1/systemone", allowInsecureHttp: false }, () => new Error("must not be called")],
   ["timeout", {}, () => new Error("no reply within 4 s")],
   ["transport", {}, () => new Error("connect refused")],
   ["http-429", {}, () => ({ status: 429, json: {} })],
@@ -160,7 +160,7 @@ describe("OB-01 verifier", () => {
         reason === "flag-off" ? { state: "off" } : { state: "not_verified", reason, withheld: false },
       );
       expect(e.calls, `${reason}: the engine is not asked again`).toHaveLength(0);
-      if (reason === "flag-off" || reason === "no-endpoint") expect(t.sent).toHaveLength(0);
+      if (reason === "flag-off" || reason === "no-endpoint" || reason === "insecure-endpoint") expect(t.sent).toHaveLength(0);
       // One line, reason + question-set version, never note content.
       if (reason !== "flag-off") {
         expect(t.logs).toEqual([`ontomark-jev: fallback reason=${reason} question-set=${QUESTION_SETS.facts}`]);
@@ -193,7 +193,7 @@ describe("OB-01 verifier", () => {
     const t = transport(noulFor([0.9, 0.9]));
     const out = await judgeIngest(e.accept, request, responses, plain, cfg({ allowInsecureHttp: false, withholdAtOrBelow: 0 }), t.deps);
     expect(t.sent).toHaveLength(0);
-    expect(out.verification).toEqual({ state: "not_verified", reason: "no-endpoint", withheld: false });
+    expect(out.verification).toEqual({ state: "not_verified", reason: "insecure-endpoint", withheld: false });
   });
 
   it("a probability outside 0..1 is malformed, and with a threshold set nothing unverified is written", async () => {
