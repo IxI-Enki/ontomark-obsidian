@@ -27,6 +27,8 @@ export interface OntomarkSettings {
   jevWithholdAtOrBelow: number;
   /** Minimum Choice confidence for a Jev proposal (query template, frontmatter edit). */
   jevMinConfidence: number;
+  /** Accept plain-http ingest and Jev endpoints on hosts other than this machine. Off by default. */
+  allowInsecureHttp: boolean;
 }
 
 export const DEFAULT_SETTINGS: OntomarkSettings = {
@@ -41,6 +43,7 @@ export const DEFAULT_SETTINGS: OntomarkSettings = {
   jevModel: "",
   jevWithholdAtOrBelow: 0,
   jevMinConfidence: DEFAULT_MIN_CONFIDENCE,
+  allowInsecureHttp: false,
 };
 
 /** Merge saved data over the defaults, repairing a value an older version or a hand edit left malformed. */
@@ -50,6 +53,8 @@ export function normaliseSettings(saved: Partial<OntomarkSettings> | null | unde
   merged.excludedFolders = parseFolderList(folders.filter((f): f is string => typeof f === "string").join(","));
   // The Jev option fails closed on a hand-edited data.json: anything but a real `true` is off.
   merged.jevEnabled = merged.jevEnabled === true;
+  // So does the plain-http opt-in.
+  merged.allowInsecureHttp = merged.allowInsecureHttp === true;
   const unit = (v: unknown, fallback: number): number => (typeof v === "number" && v >= 0 && v <= 1 ? v : fallback);
   merged.jevWithholdAtOrBelow = unit(merged.jevWithholdAtOrBelow, DEFAULT_SETTINGS.jevWithholdAtOrBelow);
   merged.jevMinConfidence = unit(merged.jevMinConfidence, DEFAULT_SETTINGS.jevMinConfidence);
@@ -71,6 +76,11 @@ export const JEV_TOGGLE_DESC =
   "Do not enable it for notes you would not send to that endpoint.";
 const JEV_KEY_DESC = "Held in memory, never saved to disk, forgotten when the plugin unloads. May be empty for a keyless local endpoint.";
 const KEY_DESC = "Held in memory, never saved to disk, forgotten when the plugin unloads.";
+/** What the plain-http opt-in gives up. Shown on the toggle; the README repeats it. */
+export const INSECURE_HTTP_DESC =
+  "Off by default. Endpoints must use https, except plain http to this machine (localhost, 127.x.x.x, [::1]). " +
+  "Turn this on only to reach an http endpoint on another host, such as a model server on your own network: " +
+  "the API key and the note text sent to it then travel unencrypted, readable by anyone on the network path.";
 
 /**
  * Settings tab. One list of definitions serves two renderers: Obsidian 1.13+
@@ -141,10 +151,7 @@ export class OntomarkSettingTab extends PluginSettingTab {
               type: "text",
               key: "ingestEndpoint",
               defaultValue: "",
-              validate: (v: string): string | undefined => {
-                const trimmed = v.trim();
-                return trimmed ? (endpointProblem(trimmed) ?? undefined) : undefined;
-              },
+              validate: (v: string): string | undefined => this.endpointValidation(v),
             },
           },
           {
@@ -179,10 +186,7 @@ export class OntomarkSettingTab extends PluginSettingTab {
               type: "text",
               key: "jevEndpoint",
               defaultValue: "",
-              validate: (v: string): string | undefined => {
-                const trimmed = v.trim();
-                return trimmed ? (endpointProblem(trimmed) ?? undefined) : undefined;
-              },
+              validate: (v: string): string | undefined => this.endpointValidation(v),
             },
           },
           {
@@ -211,7 +215,25 @@ export class OntomarkSettingTab extends PluginSettingTab {
           },
         ],
       },
+      {
+        type: "group",
+        heading: "Endpoint security",
+        items: [
+          {
+            name: "Allow plain http to other hosts",
+            desc: INSECURE_HTTP_DESC,
+            aliases: ["http", "insecure", "LAN", "network", "jev", "ingest"],
+            control: { type: "toggle", key: "allowInsecureHttp", defaultValue: false },
+          },
+        ],
+      },
     ];
+  }
+
+  /** The endpoint fields' message, under the plain-http setting as it is now. */
+  private endpointValidation(v: string): string | undefined {
+    const trimmed = v.trim();
+    return trimmed ? (endpointProblem(trimmed, { allowInsecureHttp: this.plugin.settings.allowInsecureHttp }) ?? undefined) : undefined;
   }
 
   override getControlValue(key: string): unknown {

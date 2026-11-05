@@ -1,9 +1,9 @@
 import { ItemView, Notice } from "obsidian";
 import type { WorkspaceLeaf } from "obsidian";
-import { OntomarkError } from "../client";
+import { OntomarkError, isQuiet } from "../client";
 import type { DatasetSelection, QueryResult } from "../protocol";
 import type OntomarkPlugin from "../main";
-import { renderQueryResult } from "./query-render";
+import { queryEnvelope, renderQueryResult } from "./query-render";
 import { pickTemplate } from "../jev";
 import { compileTemplate, mentionedEntities, templateOffers } from "../query-templates";
 
@@ -26,6 +26,8 @@ export class QueryView extends ItemView {
   lastResult: QueryResult | null = null;
   lastError: string | null = null;
   private resultsEl!: HTMLElement;
+  /** Bumped by every run; only the latest run renders. */
+  private runSeq = 0;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -123,19 +125,29 @@ export class QueryView extends ItemView {
     const dataset = this.datasetSelect.value as DatasetSelection;
     const sparql = this.textarea.value;
     const limit = this.plugin.settings.queryLimit;
-    this.lastError = null;
+    // Only the latest run may render: an older one that finishes later, or is
+    // rejected as superseded by the newer one, must not replace its result.
+    const seq = ++this.runSeq;
+    const current = (): boolean => seq === this.runSeq;
+    const api = this.plugin.api;
     try {
       let result: QueryResult;
       try {
-        result = await this.plugin.api.query(sparql, dataset, limit, "query-view");
+        result = await api.query(sparql, dataset, limit, "query-view");
       } catch (err) {
         if (!(err instanceof OntomarkError) || err.code !== "not_classified") throw err;
-        await this.plugin.api.classify();
-        result = await this.plugin.api.query(sparql, dataset, limit, "query-view");
+        await api.classify();
+        // A newer run may have started while this one classified; its query must not be superseded by this retry.
+        if (!current()) return;
+        result = await api.query(sparql, dataset, limit, "query-view");
       }
+      if (!current()) return;
       this.lastResult = result;
-      renderQueryResult(this.resultsEl, result);
+      this.lastError = null;
+      renderQueryResult(this.resultsEl, result, queryEnvelope(api, dataset));
     } catch (err) {
+      // Overtaken (newer run, edit, restarted worker, reindex): keep what is shown.
+      if (isQuiet(err) || !current()) return;
       const code = err instanceof OntomarkError ? err.code : "error";
       const message = err instanceof Error ? err.message : String(err);
       this.lastResult = null;

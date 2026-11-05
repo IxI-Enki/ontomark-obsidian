@@ -2,7 +2,7 @@ import { Modal } from "obsidian";
 import type { App } from "obsidian";
 import type { CandidateAssertion, EvidenceSpan, IngestAcceptResult, Withheld } from "../protocol";
 import { diffLineClass } from "./diff-modal";
-import type { JevNote } from "../jev-ingest";
+import type { JevNote, Verification } from "../jev-ingest";
 
 /** Select `utf16` of the note in the active editor, if that note is open. */
 export type RevealEvidence = (path: string, span: EvidenceSpan["utf16"]) => void;
@@ -19,6 +19,7 @@ class IngestModal extends Modal {
     app: App,
     private readonly result: IngestAcceptResult,
     private readonly notes: readonly JevNote[],
+    private readonly verification: Verification,
     private readonly resolveOnce: (value: boolean) => void,
   ) {
     super(app);
@@ -43,8 +44,28 @@ class IngestModal extends Modal {
     q.addEventListener("click", () => this.reveal(ev.utf16));
   }
 
+  /** The Jev verification state, said once at the top; nothing at all while the option is off. */
+  private verificationBanner(parent: HTMLElement): void {
+    const v = this.verification;
+    if (v.state === "off") return;
+    if (v.state === "verified") {
+      parent.createDiv({
+        text: "Jev checked every fact against its quote; any it rejected under your threshold is withheld as judged_unsupported.",
+        cls: "ontomark-help",
+        attr: { "data-ontomark": "jev-status", "data-jev-state": "verified" },
+      });
+      return;
+    }
+    const text = v.withheld
+      ? `Jev could not verify: ${v.reason}. Your withholding threshold is set, so every fact Jev did not verify was withheld (not_verified) and is not in the patch.`
+      : `Jev could not verify: ${v.reason}. The facts below were NOT checked by Jev; read each quote before applying.`;
+    parent.createDiv({ text, cls: "ontomark-warning", attr: { "data-ontomark": "jev-status", "data-jev-state": "not_verified" } });
+  }
+
   private accepted(parent: HTMLElement, items: CandidateAssertion[]): void {
-    parent.createEl("h4", { text: `Accepted (${items.length})` });
+    // Grounded means the engine found the quote in the note and the value in
+    // the vault; it does not mean the quote states the fact. The user decides.
+    parent.createEl("h4", { text: `Grounded, ready for review (${items.length})` });
     if (items.length === 0) parent.createEl("p", { text: "Nothing was grounded in the note." });
     const ul = parent.createEl("ul", { attr: { "data-ontomark": "accepted" } });
     for (const a of items) {
@@ -88,6 +109,7 @@ class IngestModal extends Modal {
     } else {
       contentEl.createEl("p", { text: "No change to write." });
     }
+    this.verificationBanner(contentEl);
     this.accepted(contentEl, result.candidates.accepted);
     this.withheld(contentEl, result.candidates.withheld);
     const buttons = contentEl.createDiv({ cls: "ontomark-diff-buttons" });
@@ -116,8 +138,13 @@ class IngestModal extends Modal {
 }
 
 /** Show what was found and what was withheld; resolves true only when the user presses Apply. */
-export function confirmIngest(app: App, result: IngestAcceptResult, notes: readonly JevNote[] = []): Promise<boolean> {
+export function confirmIngest(
+  app: App,
+  result: IngestAcceptResult,
+  notes: readonly JevNote[] = [],
+  verification: Verification = { state: "off" },
+): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
-    new IngestModal(app, result, notes, resolve).open();
+    new IngestModal(app, result, notes, verification, resolve).open();
   });
 }

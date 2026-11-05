@@ -4,7 +4,7 @@ import workerSource from "virtual:worker-source";
 import wasm from "./generated/ontomark.wasm";
 import { OntomarkApi } from "./api";
 import type { ChangeEvent, VaultPort } from "./api";
-import { OntomarkClient, OntomarkError } from "./client";
+import { OntomarkClient, OntomarkError, isQuiet } from "./client";
 import { isExcluded, parseIgnoreFilters } from "./excludes";
 import type { IgnoreFilter } from "./excludes";
 import type { EntityKind, PatchProposal, WorkerLike } from "./protocol";
@@ -20,12 +20,11 @@ import { callModel, postJson, type AbortToken } from "./ingest-transport";
 import { endpointProblem } from "./endpoint";
 import { pickEdit, type JevConfig, type JevDeps, type ParentOffer } from "./jev";
 import { judgeIngest } from "./jev-ingest";
+import { runIngest } from "./ingest-run";
 import { mentionedEntities } from "./query-templates";
 
 export { ENTITY_VIEW, QUERY_VIEW, GRAPH_VIEW };
 export type { OntomarkSettings };
-
-const QUIET_CODES = new Set(["stale", "cancelled", "superseded", "dead_epoch", "worker_restarted", "disposed"]);
 
 class AddParentModal extends Modal {
   private input!: HTMLInputElement;
@@ -209,6 +208,7 @@ export default class OntomarkPlugin extends Plugin {
       key: this.jevKey,
       withholdAtOrBelow: s.jevWithholdAtOrBelow,
       minConfidence: s.jevMinConfidence,
+      allowInsecureHttp: s.allowInsecureHttp,
     };
   }
 
@@ -229,7 +229,7 @@ export default class OntomarkPlugin extends Plugin {
   }
 
   reportError(err: unknown): void {
-    if (err instanceof OntomarkError && QUIET_CODES.has(err.code)) return;
+    if (isQuiet(err)) return;
     const message = err instanceof Error ? err.message : String(err);
     const code = err instanceof OntomarkError ? `${err.code}: ` : "";
     new Notice(`Ontomark: ${code}${message}`);
@@ -455,7 +455,7 @@ export default class OntomarkPlugin extends Plugin {
       new Notice("Ontomark: set an ingest endpoint in settings first.");
       return;
     }
-    const problem = endpointProblem(ingestEndpoint);
+    const problem = endpointProblem(ingestEndpoint, { allowInsecureHttp: this.settings.allowInsecureHttp });
     if (problem) {
       new Notice(`Ontomark: ${problem}.`);
       return;
@@ -476,29 +476,28 @@ export default class OntomarkPlugin extends Plugin {
     void this.guard(async () => {
       try {
         await this.ready;
-        const { request } = await this.api.ingestPlan(file.path);
-        const responses = await callModel(
-          ingestEndpoint,
-          key,
-          ingestModel,
-          request,
-          (m) => new Notice(`Ontomark: ${m}.`),
+        if (run.aborted) return;
+        // The api of this run: a reindex during it disposes this one, and every
+        // later step then rejects quietly with `disposed` instead of mixing two engines.
+        const api = this.api;
+        const cfg = this.jevConfig();
+        const outcome = await runIngest(
+          file.path,
+          {
+            plan: (path) => api.ingestPlan(path),
+            callModel: (request, abort) =>
+              callModel(ingestEndpoint, key, ingestModel, request, (m) => new Notice(`Ontomark: ${m}.`), abort),
+            accept: (path, request, responses) => api.ingestAccept(path, request, responses),
+            judge: cfg.enabled
+              ? (accept, request, responses, plain) => judgeIngest(accept, request, responses, plain, cfg, this.jevDeps())
+              : null,
+            review: (result, notes, verification) => confirmIngest(this.app, result, notes, verification),
+            applyPatch: (proposal, confirm) => api.applyPatch(proposal, confirm),
+          },
           run,
         );
-        if (run.aborted) return;
-        const plain = await this.api.ingestAccept(file.path, request, responses);
-        // Jev option: off by default. With it off, `judged` is `plain` and the
-        // flow below is the pre-change flow, byte for byte.
-        const cfg = this.jevConfig();
-        const judged = cfg.enabled
-          ? await judgeIngest((r) => this.api.ingestAccept(file.path, request, r), request, responses, plain, cfg, this.jevDeps())
-          : { result: plain, notes: [] };
-        const { result, notes } = judged;
-        if (!result.preview) {
-          await confirmIngest(this.app, result, notes);
-          return;
-        }
-        this.announce(await this.api.applyPatch(result.preview, () => confirmIngest(this.app, result, notes)));
+        if (run.aborted || outcome.status === "aborted" || outcome.status === "reviewed") return;
+        this.announce(outcome);
       } finally {
         if (this.ingestRun === run) this.ingestRun = null;
       }

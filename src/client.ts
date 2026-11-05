@@ -40,6 +40,18 @@ export class OntomarkError extends Error {
   }
 }
 
+/**
+ * Codes that mean "this answer was overtaken", not "something is wrong": a
+ * newer request, edit, worker or plugin instance replaced it. Nothing is
+ * reported for them, and a view that receives one keeps what it shows.
+ */
+export const QUIET_CODES: ReadonlySet<string> = new Set(["stale", "cancelled", "superseded", "dead_epoch", "worker_restarted", "disposed"]);
+
+/** Is `err` one of the routine rejections in `QUIET_CODES`? */
+export function isQuiet(err: unknown): boolean {
+  return err instanceof OntomarkError && QUIET_CODES.has(err.code);
+}
+
 export interface Timers {
   set(fn: () => void, ms: number): number;
   clear(handle: number): void;

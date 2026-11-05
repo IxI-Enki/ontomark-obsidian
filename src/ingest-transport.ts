@@ -17,6 +17,11 @@ import type { Chunk, KeySpec, ModelRequest, ModelResponse, ProposedAssertion } f
 export const MAX_CHUNKS = 64;
 /** Wall-clock bound for one model call. */
 export const TIMEOUT_MS = 60_000;
+/**
+ * Wall-clock bound for a whole run. Without it a note at the chunk limit
+ * could keep calls going for over an hour (MAX_CHUNKS × TIMEOUT_MS).
+ */
+export const RUN_DEADLINE_MS = 10 * 60_000;
 
 /** Reports a chunk that was dropped (malformed model output). */
 export type DropReporter = (message: string) => void;
@@ -105,9 +110,9 @@ export async function postJson(url: string, key: string, body: string, timeoutMs
   }
 }
 
-async function complete(endpoint: string, key: string, body: string): Promise<string> {
+async function complete(endpoint: string, key: string, body: string, timeoutMs: number): Promise<string> {
   try {
-    const res = await postJson(endpoint, key, body, TIMEOUT_MS);
+    const res = await postJson(endpoint, key, body, timeoutMs);
     if (res.status >= 300 && res.status < 400) {
       throw unavailable(`HTTP ${res.status}: the endpoint redirected; point the setting at the final URL`);
     }
@@ -146,11 +151,21 @@ export async function callModel(
     );
   }
   const responses: ModelResponse[] = [];
-  for (const chunk of request.chunks) {
+  const deadline = Date.now() + RUN_DEADLINE_MS;
+  for (const [n, chunk] of request.chunks.entries()) {
     // Checked before every request so an unload or cancel stops the run at the
     // next chunk boundary and no further bearer-authenticated call goes out.
     if (abort?.aborted) {
       throw new OntomarkError("cancelled", "extraction cancelled; nothing was applied");
+    }
+    // The run as a whole is bounded too: past the deadline no further chunk is
+    // sent, and the partial answers are discarded rather than applied.
+    const left = deadline - Date.now();
+    if (left <= 0) {
+      throw new OntomarkError(
+        "deadline_exceeded",
+        `the extraction ran past its ${RUN_DEADLINE_MS / 60_000}-minute limit after ${n} of ${request.chunks.length} chunks; the rest were not sent and nothing was applied`,
+      );
     }
     const body = JSON.stringify({
       ...(model ? { model } : {}),
@@ -161,7 +176,8 @@ export async function callModel(
       response_format: { type: "json_object" },
       temperature: 0,
     });
-    const answer = parseAnswer(await complete(endpoint, key, body), chunk.index);
+    // One call may not outlast the run: its timeout is capped at the time left.
+    const answer = parseAnswer(await complete(endpoint, key, body, Math.min(TIMEOUT_MS, left)), chunk.index);
     if (answer) responses.push(answer);
     else onDrop?.(`chunk ${chunk.index} dropped: the model did not return valid JSON for the response schema`);
   }

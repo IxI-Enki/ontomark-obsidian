@@ -12,7 +12,7 @@ vi.mock("obsidian", () => ({
   },
 }));
 
-const { callModel, MAX_CHUNKS } = await import("../src/ingest-transport");
+const { callModel, MAX_CHUNKS, RUN_DEADLINE_MS } = await import("../src/ingest-transport");
 
 const request = (n: number): ModelRequest => ({
   contract: "ontomark-ingest/facts/1",
@@ -61,6 +61,25 @@ describe("callModel", () => {
       throw new Error("connect refused");
     };
     await expect(callModel("http://e.invalid/", "k", "", request(1))).rejects.toMatchObject({ code: "model_unavailable" });
+  });
+
+  it("stops at the run deadline: no further chunk is sent and the run fails with the reason", async () => {
+    let now = 1_000_000;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      // Each call takes four minutes of wall clock: the third chunk would start past ten.
+      handler = async () => {
+        now += 4 * 60_000;
+        return reply(JSON.stringify({ assertions: [] }));
+      };
+      const err = await callModel("http://e.invalid/", "k", "", request(5)).catch((e: unknown) => e);
+      expect(err).toMatchObject({ code: "deadline_exceeded" });
+      expect(String((err as Error).message)).toContain(`${RUN_DEADLINE_MS / 60_000}-minute limit after 3 of 5 chunks`);
+      expect(String((err as Error).message)).toContain("nothing was applied");
+      expect(calls).toHaveLength(3);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("refuses a note with too many chunks before sending anything", async () => {

@@ -17,6 +17,7 @@ import {
   type JevReply,
 } from "../src/jev";
 import { judgeIngest } from "../src/jev-ingest";
+import { OntomarkError } from "../src/client";
 import { compileTemplate, mentionedEntities, safeIri, templateOffers } from "../src/query-templates";
 import { DEFAULT_SETTINGS, normaliseSettings } from "../src/settings";
 import type { CandidateAssertion, Entity, IngestAcceptResult, ModelRequest, ModelResponse } from "../src/protocol";
@@ -28,6 +29,8 @@ const cfg = (over: Partial<JevConfig> = {}): JevConfig => ({
   key: "sekret",
   withholdAtOrBelow: 0.1,
   minConfidence: 0.6,
+  // The stub endpoint is plain http on a host that is not this machine.
+  allowInsecureHttp: true,
   ...over,
 });
 
@@ -70,6 +73,7 @@ const FAILURES: [string, Partial<JevConfig>, (b: Sent["body"]) => JevReply | Err
   ["flag-off", { enabled: false }, () => new Error("must not be called")],
   ["no-endpoint", { endpoint: "" }, () => new Error("must not be called")],
   ["no-endpoint", { endpoint: "ftp://x" }, () => new Error("must not be called")],
+  ["no-endpoint", { endpoint: "http://192.168.2.10:8084/v1/systemone", allowInsecureHttp: false }, () => new Error("must not be called")],
   ["timeout", {}, () => new Error("no reply within 4 s")],
   ["transport", {}, () => new Error("connect refused")],
   ["http-429", {}, () => ({ status: 429, json: {} })],
@@ -134,17 +138,27 @@ function engine() {
   return { accept, calls };
 }
 
+/** The result of a run that failed closed: nothing to write, every plain fact withheld with its reason. */
+const expectNothingWritten = (out: Awaited<ReturnType<typeof judgeIngest>>, reasons: Record<string, string>, label = ""): void => {
+  expect(out.result.preview, label).toBeNull();
+  expect(out.result.candidates.accepted, label).toEqual([]);
+  expect(Object.fromEntries(out.result.candidates.withheld.map((w) => [w.key, w.reason.reason])), label).toEqual(reasons);
+};
+
 describe("OB-01 verifier", () => {
-  it("every fallback returns the plain result itself, untouched, with no notes", async () => {
+  it("advisory (threshold 0): every fallback keeps the plain result, flagged not_verified with the reason", async () => {
     for (const [reason, over, reply] of FAILURES) {
       const e = engine();
       const plain = await e.accept(responses);
       e.calls.length = 0;
       const t = transport(reply);
-      const out = await judgeIngest(e.accept, request, responses, plain, cfg(over), t.deps);
+      const out = await judgeIngest(e.accept, request, responses, plain, cfg({ withholdAtOrBelow: 0, ...over }), t.deps);
       expect(out.result, reason).toBe(plain);
       expect(out.notes, reason).toEqual([]);
       expect(out.outcome, reason).toBe(reason);
+      expect(out.verification, reason).toEqual(
+        reason === "flag-off" ? { state: "off" } : { state: "not_verified", reason, withheld: false },
+      );
       expect(e.calls, `${reason}: the engine is not asked again`).toHaveLength(0);
       if (reason === "flag-off" || reason === "no-endpoint") expect(t.sent).toHaveLength(0);
       // One line, reason + question-set version, never note content.
@@ -154,12 +168,58 @@ describe("OB-01 verifier", () => {
     }
   });
 
-  it("a probability outside 0..1 is malformed", async () => {
+  it("withholding policy (threshold > 0): every fallback fails closed, withholding each unverified fact", async () => {
+    for (const [reason, over, reply] of FAILURES) {
+      const e = engine();
+      const plain = await e.accept(responses);
+      const out = await judgeIngest(e.accept, request, responses, plain, cfg({ withholdAtOrBelow: 0.1, ...over }), transport(reply).deps);
+      expect(out.outcome, reason).toBe(reason);
+      if (reason === "flag-off") {
+        // Off is off: the pre-option flow, whatever the threshold says.
+        expect(out.result, reason).toBe(plain);
+        expect(out.verification).toEqual({ state: "off" });
+        continue;
+      }
+      expect(out.verification, reason).toEqual({ state: "not_verified", reason, withheld: true });
+      expectNothingWritten(out, { "is-a": "not_verified", "part-of": "not_verified" }, reason);
+      // The withholding went through the engine (re-run on no surviving proposals), as for a rejection.
+      expect(e.calls.at(-1), reason).toEqual([{ chunk: 0, assertions: [] }]);
+    }
+  });
+
+  it("refuses a plain-http endpoint on another host unless the user opted in", async () => {
+    const e = engine();
+    const plain = await e.accept(responses);
+    const t = transport(noulFor([0.9, 0.9]));
+    const out = await judgeIngest(e.accept, request, responses, plain, cfg({ allowInsecureHttp: false, withholdAtOrBelow: 0 }), t.deps);
+    expect(t.sent).toHaveLength(0);
+    expect(out.verification).toEqual({ state: "not_verified", reason: "no-endpoint", withheld: false });
+  });
+
+  it("a probability outside 0..1 is malformed, and with a threshold set nothing unverified is written", async () => {
     const e = engine();
     const plain = await e.accept(responses);
     const out = await judgeIngest(e.accept, request, responses, plain, cfg(), transport(noulFor([7, 7])).deps);
-    expect(out.result).toBe(plain);
     expect(out.outcome).toBe("malformed");
+    expectNothingWritten(out, { "is-a": "not_verified", "part-of": "not_verified" });
+  });
+
+  it("verified: every fact rated and none rejected keeps the plain result", async () => {
+    const e = engine();
+    const plain = await e.accept(responses);
+    const out = await judgeIngest(e.accept, request, responses, plain, cfg(), transport(noulFor([0.9, 0.9])).deps);
+    expect(out.result).toBe(plain);
+    expect(out.verification).toEqual({ state: "verified" });
+  });
+
+  it("never swallows disposed: the run stops", async () => {
+    const e = engine();
+    const plain = await e.accept(responses);
+    const gone = async (): Promise<IngestAcceptResult> => Promise.reject(new OntomarkError("disposed", "the client was disposed"));
+    // During the fail-closed withholding ...
+    await expect(judgeIngest(gone, request, responses, plain, cfg(), transport(() => new Error("down")).deps)).rejects.toMatchObject({ code: "disposed" });
+    // ... and during the re-run after a rejection.
+    await expect(judgeIngest(gone, request, responses, plain, cfg(), transport(noulFor([0.9, 0.02])).deps)).rejects.toMatchObject({ code: "disposed" });
   });
 
   it("builds the contract's wire shape: one Noul per fact, criteria {true,false}, bearer, 4 s, no retry", async () => {
@@ -211,7 +271,7 @@ describe("OB-01 verifier", () => {
     expect(out.notes).toEqual([]);
   });
 
-  it("returns the plain result if the re-run would write something the plain run did not", async () => {
+  it("writes nothing if the re-run would write something the plain run did not", async () => {
     const e = engine();
     const plain = await e.accept(responses);
     let n = 0;
@@ -221,16 +281,18 @@ describe("OB-01 verifier", () => {
       return ++n > 2 ? { ...r, candidates: { ...r.candidates, accepted: [fact("is-a", "[[Other]]", "q")] } } : r;
     };
     const out = await judgeIngest(odd, request, responses, plain, cfg(), transport(noulFor([0.9, 0.02])).deps);
-    expect(out.result).toBe(plain);
+    // Never the plain patch: it would write the fact Jev rejected.
     expect(out.outcome).toBe("not-monotone");
+    expect(out.verification).toEqual({ state: "not_verified", reason: "not-monotone", withheld: true });
+    expectNothingWritten(out, { "is-a": "not_verified", "part-of": "judged_unsupported" });
   });
 
-  it("fails open if the engine throws during the re-run", async () => {
+  it("fails closed if the engine throws during the re-run", async () => {
     const e = engine();
     const plain = await e.accept(responses);
     const out = await judgeIngest(async () => Promise.reject(new Error("worker gone")), request, responses, plain, cfg(), transport(noulFor([0.9, 0.02])).deps);
-    expect(out.result).toBe(plain);
     expect(out.outcome).toBe("error");
+    expectNothingWritten(out, { "is-a": "not_verified", "part-of": "judged_unsupported" });
   });
 
   it("verifyFacts sends nothing for no facts", async () => {

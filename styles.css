@@ -1,6 +1,6 @@
 .ontomark-view { padding: var(--size-4-3); }
 .ontomark-header { border-bottom: 1px solid var(--background-modifier-border); padding-bottom: var(--size-4-2); margin-bottom: var(--size-4-2); }
-.ontomark-status, .ontomark-progress, .ontomark-help, .ontomark-count, .ontomark-plain, .ontomark-empty, .ontomark-parents { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.ontomark-status, .ontomark-query-status, .ontomark-progress, .ontomark-help, .ontomark-count, .ontomark-plain, .ontomark-empty, .ontomark-parents { color: var(--text-muted); font-size: var(--font-ui-smaller); }
 .ontomark-warning { color: var(--color-red); font-size: var(--font-ui-small); margin: var(--size-4-1) 0; }
 .ontomark-error { color: var(--color-red); }
 .ontomark-actions { display: flex; gap: var(--size-4-2); margin: var(--size-4-2) 0; }

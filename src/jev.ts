@@ -41,6 +41,8 @@ export interface JevConfig {
   withholdAtOrBelow: number;
   /** A proposal (query template, frontmatter edit) needs at least this confidence. */
   minConfidence: number;
+  /** The user's opt-in to plain http for a host other than this machine (see `endpointProblem`). */
+  allowInsecureHttp?: boolean;
 }
 
 export const DEFAULT_MODEL = "jev-latest";
@@ -86,7 +88,7 @@ export async function jevAsk(
 ): Promise<Asked<Record<string, Json>>> {
   if (!cfg.enabled) return fallback(deps, set, "flag-off");
   const endpoint = cfg.endpoint.trim();
-  if (!endpoint || endpointProblem(endpoint)) return fallback(deps, set, "no-endpoint");
+  if (!endpoint || endpointProblem(endpoint, { allowInsecureHttp: cfg.allowInsecureHttp })) return fallback(deps, set, "no-endpoint");
   let reply: JevReply;
   try {
     reply = await deps.post(

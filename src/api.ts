@@ -9,6 +9,7 @@
 
 import { OntomarkClient, OntomarkError } from "./client";
 import type {
+  Classification,
   ClassifyDone,
   DatasetSelection,
   DescribeResult,
@@ -71,15 +72,25 @@ export interface Status {
   profile: ProfileId;
   classifying: boolean;
   lastClassified: number | null;
+  /**
+   * The classification the index at the current generation reported, else
+   * that of the last classify that finished (at generation `lastClassified`);
+   * `null` when neither is known. Query results use it to say whether the inferred
+   * triples they read are complete.
+   */
+  classification: Classification | null;
 }
 
 export class OntomarkApi {
   private listeners = new Set<(e: ChangeEvent) => void>();
   private classifying = false;
   private lastClassified: number | null = null;
+  private lastClassification: Classification | null = null;
   private lastIndex: IndexResult | null = null;
   /** Generation `lastIndex` describes; `-1` until the first index. */
   private indexGeneration = -1;
+  /** The index read in flight for `entities()`, shared so concurrent callers do not supersede each other. */
+  private entitiesRead: { generation: number; promise: Promise<IndexResult> } | null = null;
 
   constructor(
     readonly client: OntomarkClient,
@@ -105,6 +116,8 @@ export class OntomarkApi {
       profile: this.client.profileId,
       classifying: this.classifying,
       lastClassified: this.lastClassified,
+      classification:
+        (this.indexGeneration === this.client.generation ? this.lastIndex?.classification : null) ?? this.lastClassification,
     };
   }
 
@@ -149,10 +162,20 @@ export class OntomarkApi {
 
   /** The entities at the current generation, re-fetched only when the index has moved. */
   async entities(): Promise<Entity[]> {
-    if (this.lastIndex === null || this.indexGeneration !== this.client.generation) {
-      await this.index("api-entities");
+    const generation = this.client.generation;
+    if (this.lastIndex !== null && this.indexGeneration === generation) return this.lastIndex.entities;
+    // One read per generation however many callers there are (several SPARQL
+    // blocks resolving `__THIS__` at once): on the shared "api-entities"
+    // channel a second read would supersede the first.
+    if (this.entitiesRead?.generation !== generation) {
+      const promise = this.index("api-entities");
+      this.entitiesRead = { generation, promise };
+      const clear = (): void => {
+        if (this.entitiesRead?.promise === promise) this.entitiesRead = null;
+      };
+      promise.then(clear, clear);
     }
-    return this.lastIndex?.entities ?? [];
+    return (await this.entitiesRead.promise).entities;
   }
 
   /** The entity whose note is at `path`, or `undefined` when that note is not an ontology entity. */
@@ -189,6 +212,7 @@ export class OntomarkApi {
     try {
       const result = await this.client.classify();
       this.lastClassified = generation;
+      this.lastClassification = result.classification;
       this.emit({ type: "classified", generation, result });
       return result;
     } catch (err) {
@@ -250,7 +274,17 @@ export class OntomarkApi {
       const message = err instanceof Error ? err.message : String(err);
       return { status: "refused", path, code, message };
     }
-    await this.client.upsert(path, proposal.new_text);
+    // Writing the file and updating the engine are two steps, not one atomic
+    // change. The file on disk is the source of truth: once `process` has
+    // written it the edit is applied, whatever happens to the engine next. If
+    // the update fails (most often because a reindex or unload disposed this
+    // client), the vault's modify event or the next reindex loads the new
+    // text, so the outcome is still `applied`, not a failure.
+    try {
+      await this.client.upsert(path, proposal.new_text);
+    } catch {
+      return { status: "applied", path, digest: proposal.new_digest };
+    }
     this.emit({ type: "indexed", generation: this.client.generation });
     return { status: "applied", path, digest: proposal.new_digest };
   }

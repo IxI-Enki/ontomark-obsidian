@@ -91,7 +91,10 @@ async function main() {
   // (the Excluded folders text control, ADR-OBS-005, sits above it).
   const items = tab.containerEl.findAll((el) => el.hasClass("setting-item"));
   const headingAt = items.findIndex((el) => el.hasClass("setting-item-heading") && el.textContent.includes("Assisted ingest"));
-  const inputs = items.slice(headingAt + 1).flatMap((item) => item.findAll((el) => el.tagName === "INPUT"));
+  // Up to the next heading: the Jev and endpoint-security groups follow it.
+  const nextHeading = items.findIndex((el, i) => i > headingAt && el.hasClass("setting-item-heading"));
+  const group = items.slice(headingAt + 1, nextHeading < 0 ? undefined : nextHeading);
+  const inputs = group.flatMap((item) => item.findAll((el) => el.tagName === "INPUT"));
   const keyInput = inputs.find((el) => el.type === "password");
   const textInputs = inputs.filter((el) => el.type !== "password");
   check("settings: endpoint, model and a password-type key field", headingAt >= 0 && textInputs.length === 2 && !!keyInput, inputs.map((i) => i.type));
