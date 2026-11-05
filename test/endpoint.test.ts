@@ -7,7 +7,7 @@ const ok = (url: string, allowInsecureHttp = false): boolean => endpointProblem(
 
 describe("endpointProblem", () => {
   it("accepts https to any host", () => {
-    for (const url of ["https://api.example.com/v1/chat/completions", "https://192.168.2.132:8084/v1", "https://localhost/v1"]) {
+    for (const url of ["https://api.example.com/v1/chat/completions", "https://192.0.2.10:8084/v1", "https://localhost/v1"]) {
       expect(ok(url), url).toBe(true);
     }
   });
@@ -29,7 +29,7 @@ describe("endpointProblem", () => {
 
   it("refuses plain http to any other host by default, naming the way out", () => {
     for (const url of [
-      "http://192.168.2.132:8084/v1",
+      "http://192.0.2.10:8084/v1",
       "http://10.0.0.5/v1",
       "http://api.example.com/v1",
       "http://localhost.example.com/v1",
@@ -44,12 +44,12 @@ describe("endpointProblem", () => {
   });
 
   it("accepts plain http to another host only with the explicit opt-in", () => {
-    expect(ok("http://192.168.2.132:8084/v1", true)).toBe(true);
+    expect(ok("http://192.0.2.10:8084/v1", true)).toBe(true);
     expect(ok("http://api.example.com/v1", true)).toBe(true);
   });
 
   it("the opt-in relaxes nothing else", () => {
-    for (const url of ["ftp://192.168.2.132/v1", "http://u:p@192.168.2.132/v1", "http://192.168.2.132/v1#x", "not a url"]) {
+    for (const url of ["ftp://192.0.2.10/v1", "http://u:p@192.0.2.10/v1", "http://192.0.2.10/v1#x", "not a url"]) {
       expect(ok(url, true), url).toBe(false);
     }
   });
